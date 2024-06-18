@@ -1,11 +1,12 @@
 import torch
 from einops import rearrange
-import triton
-import triton.language as tl
+
 import torch.nn.functional as F
 import torch.nn as nn
 
-from fla.ops.gla import fused_chunk_gla, chunk_gla, fused_recurrent_gla
+from fla.ops.gla import fused_chunk_gla, fused_recurrent_gla
+
+import gla_model
 
 
 class GatedLinearAttention(nn.Module):
@@ -94,8 +95,9 @@ class GatedLinearAttention(nn.Module):
 if __name__ == "__main__":
     BATCH, H, N_CTX, D_MODEL = 32, 4, 2048, 1024
 
-    GLA = GatedLinearAttention(D_MODEL, H, use_gk=True,
-                               use_gv=False).cuda().to(torch.bfloat16)
+    config = gla_model.GLAConfig(d_model=D_MODEL, n_head=H)
+
+    GLA = GatedLinearAttention(config).cuda().to(torch.bfloat16)
 
     x = torch.randn((BATCH, N_CTX, D_MODEL),
                     dtype=torch.bfloat16,

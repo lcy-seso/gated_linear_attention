@@ -12,6 +12,7 @@ from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutpu
 
 
 class RMSNorm(nn.Module):
+
     def __init__(self, dim: int, eps: float = 1e-6, elementwise_affine=True):
         super().__init__()
         self.eps = eps
@@ -29,6 +30,7 @@ class RMSNorm(nn.Module):
         if self.weight is not None:
             output = output * self.weight
         return output
+
 
 class GLAConfig(PretrainedConfig):
     model_type = "gla"
@@ -51,7 +53,7 @@ class GLAConfig(PretrainedConfig):
         load_from_llama=False,
         **kwargs,
     ):
-    
+
         self.vocab_size = vocab_size
         self.d_model = d_model
         self.n_head = n_head
@@ -71,24 +73,26 @@ class GLAConfig(PretrainedConfig):
             **kwargs,
         )
 
+
 class GLABlock(nn.Module):
+
     def __init__(self, config):
         super().__init__()
         self.ln_1 = RMSNorm(config.d_model, eps=1e-5)
-        
+
         self.attn = GatedLinearAttention(config)
         self.ln_2 = RMSNorm(config.d_model, eps=1e-5)
 
         mlp_ratio = 4
         multiple_of = 256
         mlp_hidden = int(config.d_model * mlp_ratio * 2 / 3)
-        mlp_hidden = multiple_of * ((mlp_hidden + multiple_of - 1) // multiple_of)
+        mlp_hidden = multiple_of * \
+            ((mlp_hidden + multiple_of - 1) // multiple_of)
 
         self.w1 = nn.Linear(config.d_model, mlp_hidden, bias=False)
         self.w2 = nn.Linear(mlp_hidden, config.d_model, bias=False)
         self.w3 = nn.Linear(config.d_model, mlp_hidden, bias=False)
         self.mlp = lambda x: self.w2(F.silu(self.w1(x)) * self.w3(x))
-
 
     def forward(self, x, hidden_states=None):
         # attention/rnn
@@ -98,7 +102,8 @@ class GLABlock(nn.Module):
         x_mlp = self.mlp(self.ln_2(x))
         x = x + x_mlp
         return x, new_hidden_states
-    
+
+
 class GLAPreTrainedModel(PreTrainedModel):
     config_class = GLAConfig
     supports_gradient_checkpointing = True
@@ -109,15 +114,18 @@ class GLAPreTrainedModel(PreTrainedModel):
 
 
 class GLAModel(GLAPreTrainedModel):
+
     def __init__(self, config):
         super().__init__(config)
         self.config = config
 
         self.wte = nn.Embedding(config.vocab_size, config.d_model)
-        self.h = nn.ModuleList([GLABlock(config) for _ in range(config.n_layer)])
+        self.h = nn.ModuleList(
+            [GLABlock(config) for _ in range(config.n_layer)])
         self.ln_f = RMSNorm(config.d_model, eps=1e-5)
 
-    def forward( self,
+    def forward(
+        self,
         input_ids: torch.LongTensor = None,
         hidden_states: torch.Tensor = None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
@@ -130,15 +138,17 @@ class GLAModel(GLAPreTrainedModel):
             x, last_context_state = block(x, hidden_state)
             new_hidden_states.append(last_context_state)
 
-        x = self.ln_f(x)            
-        
+        x = self.ln_f(x)
+
         # the hidden states now means the recurrent hidden states
         return BaseModelOutputWithPast(
             last_hidden_state=x,
             hidden_states=new_hidden_states,
         )
 
+
 class GLAForCausalLM(GLAPreTrainedModel):
+
     def __init__(self, config):
         super().__init__(config)
         self.config = config
@@ -159,11 +169,11 @@ class GLAForCausalLM(GLAPreTrainedModel):
         if isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
         elif isinstance(module, nn.LayerNorm) or isinstance(module, RMSNorm):
-            if hasattr(module, "bias") and  module.bias is not None:
+            if hasattr(module, "bias") and module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
             if hasattr(module, "weight") and module.weight is not None:
                 torch.nn.init.ones_(module.weight)
-    
+
     def _post_init(self):
         """custom init strategy"""
         for name, module in self.named_modules():
@@ -191,13 +201,15 @@ class GLAForCausalLM(GLAPreTrainedModel):
         return_dict: Optional[bool] = True,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         assert return_dict is True
-        
+
         xmr_output = self.transformer(input_ids, hidden_states)
         logits = self.lm_head(xmr_output.last_hidden_state)
         new_hidden_states = xmr_output.hidden_states
-        
+
         if labels is not None:
-            loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), labels.reshape(-1), ignore_index=-1)
+            loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)),
+                                   labels.reshape(-1),
+                                   ignore_index=-1)
         else:
             loss = None
 
